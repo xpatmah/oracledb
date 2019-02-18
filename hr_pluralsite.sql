@@ -1,0 +1,133 @@
+--declare 
+--cursor nested_cursor(p_row number default 5) is 
+--    select deptId , cursor( select empId from employees where department_id = deptId and rownum <= p_row) empIfo
+--    from departments where rownum <= p_row;
+-- l_depatment_id departments.department_id%type;
+-- rc_emp_info sys_refcursor;
+-- 
+--begin
+--null;
+--end; 
+--declare
+--
+--cursor result_curson(p_row number default 5) 
+--  is select * from employee_temp where rownum <= p_row for update of job_id nowait;
+--job_id_emp varchar(30):='';
+--begin 
+--  for cur_in in result_curson(10) loop
+--    update employee_temp set job_id = 'NO JOB' 
+--    where current of result_curson;
+--  end loop;
+--  Commit;
+--end;
+
+--declare 
+--job_id_proc varchar(20):=''; 
+--begin
+--  select job_id into job_id_proc from employees where employee_id = 213;
+--  case job_id_proc 
+--    when 'IT_PROG' then
+--      dbms_output.put_line('Banda is a job programmer');
+--    when 'AD_PRES' then 
+--      dbms_output.put_line('Banda is AD press');
+--    else 
+--      dbms_output.put_line('Banda is AD press');
+--    end case;
+--end;
+
+--declare 
+--outerloop_counter number:=1; 
+--begin
+--  if outerloop_counter = 1 then 
+--    dbms_output.put_line('outerloop_counter' || outerloop_counter);
+--  elsif outerloop_counter =2 then
+--     dbms_output.put_line('outerloop_counter' || outerloop_counter);
+--  end if;
+--end;
+
+--declare 
+--outerloop_counter number:=1; 
+--begin
+-- <<outer_loop>>
+-- while outerloop_counter < 5 loop
+--    dbms_output.put_line('Outer' || outerloop_counter);
+--    outerloop_counter := outerloop_counter + 1;
+-- end loop outer_loop;
+--end;
+
+--declare 
+--outerloop_counter number:=5; 
+--begin
+-- <<outer_loop>>
+-- for loop_counter_outer in 1..3 loop
+--    dbms_output.put_line('Outer' || loop_counter_outer);
+--    <<inner_loop>>
+--    for inner_loop_counter in 1..5 loop
+--       exit outer_loop when inner_loop_counter = 3;
+--       dbms_output.put_line('Inner '|| inner_loop_counter);
+--    end loop inner_loop;
+-- end loop outer_loop;
+--end;
+
+
+----FOR LOOP
+--declare 
+--l_sum number:=0;
+--begin
+--  --for l_counter in reverse 1..3 loop
+--  for l_counter in 1..3 loop
+--  --for l_counter in 1..1 loop only once
+--    l_sum :=  l_sum + l_counter;
+--  end loop;
+--  dbms_output.put_line(l_sum);
+--end;
+
+
+----Loops
+--declare
+--f_n employees.first_name%type;
+--row_counter integer := 1;
+--begin
+--    loop
+--        SELECT FIRST_NAME into f_n  FROM EMPLOYEES where employee_id = 213; 
+--        dbms_output.put_line(row_counter || f_n);
+--        if row_counter = 1 then 
+--          goto out_of_the_loop;
+--        end if;
+--        exit when row_counter = 1;
+--    end loop;
+--    <<out_of_the_loop>>
+--    null;
+--end;
+
+--select * from EMployees where phone_number = '590.423.4569';
+--select first_name  from employees where phone_number = '590.423.4569';
+
+--declare
+--my_int integer:=20;
+--subtype local_1 is number(20);
+--local_11 local_1 :=10;
+--l_timestamp timestamp(13);
+--current_timestamp_data current_timestamp ;
+--begin 
+--  l_timestamp := sysdate;
+--  current_timestamp_data := TO;
+--  dbms_output.put_line(local_11|| l_timestamp);
+--  dbms_output.put_line(local_11|| current_timestamp_data);
+--end;
+
+--<<parent>>
+-- declare
+--lvar number(2) :=2;
+--lvar2 number(2):=10;
+-- begin
+--declare
+--lvar2 number(2) := 23;
+-- begin
+--   dbms_output.put_line(lvar2); 
+--   dbms_output.put_line(parent.lvar2);
+-- end;
+--  dbms_output.put_line(lvar); 
+-- end;
+-- 
+ 

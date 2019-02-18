@@ -1,0 +1,2 @@
+update using cursor the employee table job_id where salary is less than 3000;
+where current of 
