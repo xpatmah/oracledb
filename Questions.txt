@@ -1,2 +1,5 @@
 update using cursor the employee table job_id where salary is less than 3000;
 where current of 
+
+
+how to return a value from a procedure. 
