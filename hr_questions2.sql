@@ -67,3 +67,23 @@ SELECT department_id
 FROM employees  NATURAL JOIN departments
 WHERE first_name = 'Alexis'
 AND last_name = 'Bull';
+
+select * from employee_temp e1 where 2 = (select count(distinct salary) from employee_temp e where e.salary >= e1.salary);
+
+select * from employee_temp e1 where department_id in (select department_id from employee_temp e 
+where e.department_id = e1.department_id);  
+
+select * from employees where salary > any( select salary from employees where department_id in (50,60));
+
+select * from employees where salary > all( select salary from employees where department_id in (50,60));
+
+select first_name , last_name from employees where (department_id, salary) in 
+(select department_id , min(salary) from employees group by department_id);
+
+select * from employees
+union
+select * from employee_temp;
+
+select first_name , last_name from employees
+union all
+select first_name, last_name from employee_temp;
