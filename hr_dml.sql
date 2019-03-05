@@ -79,3 +79,9 @@ create table org_table(
 )
 
 drop table org_table;
+
+-- Data Dictionary views
+
+select * from dictionary where table_name LIKE '%USER%';
+
+select * from dictionary where table_name like '%DBA_OBJECTS%';
