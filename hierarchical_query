@@ -1,0 +1,6 @@
+SELECT employee_id, last_name, manager_id , level lol ,PRIOR employee_id ,prior DBMS_RANDOM.value
+   FROM employees
+   CONNECT BY 
+   level <= 3 and
+   PRIOR employee_id = employee_id
+   and prior DBMS_RANDOM.value is not null;
