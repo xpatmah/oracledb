@@ -1,0 +1,726 @@
+Reg : sys_guid()
+This question has been Answered.
+
+ranit B
+Guru
+ranit B 15-Apr-2013 06:07
+Hi Experts,
+
+I know question is very simple, but just trying to learn things clearly...
+
+I'm not able to get the use of <tt>SYS_GUID</tt> here.
+It seems like it's used to generate some unique id but why <tt>'PRIOR SYS_GUID()'</tt> and that too checking for <tt>'IS NOT NULL'</tt>?
+WITH xx AS
+(
+        SELECT 1 id, 'A,B' str FROM DUAL
+        UNION ALL
+        SELECT 2 id, 'C,D' str FROM DUAL
+        --UNION ALL
+        --SELECT 2 id, 'B,A,E,E,E,D,F' str FROM DUAL
+)
+select 
+    id, regexp_substr(str,'[^,]',1,level), level, SYS_GUID() 
+from xx
+connect by level <= length(replace(str,','))
+    and PRIOR id =  id
+    and PRIOR SYS_GUID() is not null  /* on commenting this getting err : "ORA-01436: CONNECT BY loop in user data" */
+order by id, level;
+Output :
+1     A     1     DA607FA725E21435E0440003BA095435
+1     B     2     DA607FA725E41435E0440003BA095435
+2     C     1     DA607FA725E61435E0440003BA095435
+2     D     2     DA607FA725E81435E0440003BA095435
+Can any body please explain me this?
+
+Oracle version: Oracle Database 10g Enterprise Edition Release *10.2.0.5.0* - 64bi
+BluShadowCorrect Answer
+by BluShadow on 15-Apr-2013 10:57
+ranit B wrote:
+but... we cannot use the NOCYCLE keyword, because we are doing row generation, and the NOCYCLE keyword prevents that row generation from happening...
+Blu- I didn't get this one clearly .
+
+From docs( http://docs.oracle.com/cd/B19306_01/server.102/b14200/queries003.htm ),
+The NOCYCLE parameter instructs Oracle Database to return rows from a query even if a CONNECT BY LOOP exists in the data.
+Both seems contradicting to each other.
+
+Am i missing some concept or getting some point wrongly?
+Could you please explain?
+I said I thought I'd struggled to explain it (it was too early)
+
+Ok, let's break it down to basics...
+
+Example, we've got 2 id's and we want to generate 3 rows for each...
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5  from   t
+  6* connect by level <= 3
+SQL> /
+
+        ID      LEVEL
+---------- ----------
+         1          1
+         1          2
+         1          3
+         2          3
+         2          2
+         1          3
+         2          3
+         2          1
+         1          2
+         1          3
+         2          3
+         2          2
+         1          3
+         2          3
+
+14 rows selected.
+... but we end up with many more rows than expected. This is because the CONNECT BY is effectively causing a cartesian join between the two id's, which we can see more clearly if we show other information in our output...
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5        ,prior id
+  6        ,sys_connect_by_path(id,'=>') as cpath
+  7  from   t
+  8* connect by level <= 3
+SQL> /
+
+        ID      LEVEL    PRIORID CPATH
+---------- ---------- ---------- --------------------------------------------------
+         1          1            =>1
+         1          2          1 =>1=>1
+         1          3          1 =>1=>1=>1
+         2          3          1 =>1=>1=>2
+         2          2          1 =>1=>2
+         1          3          2 =>1=>2=>1
+         2          3          2 =>1=>2=>2
+         2          1            =>2
+         1          2          2 =>2=>1
+         1          3          1 =>2=>1=>1
+         2          3          1 =>2=>1=>2
+         2          2          2 =>2=>2
+         1          3          2 =>2=>2=>1
+         2          3          2 =>2=>2=>2
+
+14 rows selected.
+... so we want to ensure that our CONNECT BY condition only connects for the source id it's processing rather than all possible combinations... and hence we add our "id = prior id" condition
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5        ,prior id
+  6        ,sys_connect_by_path(id,'=>') as cpath
+  7  from   t
+  8  connect by level <= 3
+  9*        and id = prior id
+SQL> /
+ERROR:
+ORA-01436: CONNECT BY loop in user data
+Which says we have a cycle (connect by loop). So, consider the condition we've just added... ID = PRIOR ID... and look at the previous data that was being output...
+
+As the rows generate, we have lots of previous rows where ID could equal PRIOR ID, some of which are from the same path we're on... so obviously it's now cycling and Oracle cannot deal with that as it's an infinite loop.
+
+If we use the NOCYCLE keyword, to try and get around this...
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5        ,prior id
+  6        ,sys_connect_by_path(id,'=>') as cpath
+  7  from   t
+  8  connect by nocycle level <= 3
+  9*        and id = prior id
+SQL> /
+
+        ID      LEVEL    PRIORID CPATH
+---------- ---------- ---------- -------------------------
+         1          1            =>1
+         2          1            =>2
+We don't get what we want... because we do actually want the id to equal the prior id for the number of levels we want... but the NOCYCLE applies to the whole connect by clauses and the fact that ID = PRIOR ID is preventing it from getting past the first level, while NOCYCLE is in place.
+
+So, can we just add something that's unique to each row... like sys_guid()
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5        ,prior id
+  6        ,sys_connect_by_path(id,'=>') as cpath
+  7  from   t
+  8  connect by level <= 3
+  9         and id = prior id
+ 10*        and sys_guid() is not null
+SQL> /
+ERROR:
+ORA-01436: CONNECT BY loop in user data
+... no, because we still have the cycle of the current and prior ID's.
+
+But if we use the PRIOR sys_guid...
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5        ,prior id
+  6        ,sys_connect_by_path(id,'=>') as cpath
+  7  from   t
+  8  connect by level <= 3
+  9         and id = prior id
+ 10*        and prior sys_guid() is not null
+SQL> /
+
+        ID      LEVEL    PRIORID CPATH
+---------- ---------- ---------- ---------------------
+         1          1            =>1
+         1          2          1 =>1=>1
+         1          3          1 =>1=>1=>1
+         2          1            =>2
+         2          2          2 =>2=>2
+         2          3          2 =>2=>2=>2
+
+6 rows selected.
+... it works.
+
+The key thing here is the PRIOR keyword (and has also been demonstrated in Manik's example using a sequence along with PRIOR).
+
+The PRIOR keyword is internally adding that sys_guid() to the connection when looking up the data to connect by, and makes the SQL engine see internally that the current row and the prior row are different things (which isn't obvious to it from just the ID)
+
+If I've got time, I'll try and knock up some PL/SQL code that demonstrates how Oracle is (probably - as I obviously don't know Oracle internal code) processing the hierarchical query.
+See the answer in context
+7308 ViewsTags:
+Average User Rating: No ratings (0 ratings)Average User RatingNo ratings(0 ratings)
+1. Re: Reg : sys_guid()
+jeneesh
+Legend
+jeneesh 15-Apr-2013 06:41 (in response to ranit B)
+I used to feel like, it is a work around provided by ORACLE.
+
+How it works is not very logical - at least to me..
+
+Laurent Schneider shared same thing in his blog - http://laurentschneider.com/wordpress/2008/09/cycling.html
+
+I have not seen any logical explanation to the use of SYS_GUID() or dbms_random ...
+
+In my opinion the condition - "and PRIOR SYS_GUID() is not null" will be always true..
+
+It is same as giving a condition - "and prior 1 is not null". But this condition will fail if you replace in your query..
+
+Let us hope for a logical explanation from some experts - if at all there is any..
+Like Show 0 Likes(0)Actions 
+2. Re: Reg : sys_guid()
+Manik
+Super Elite
+Manik 15-Apr-2013 06:43 (in response to ranit B)
+Ranit, even I too have the same question .. though I use it many times for splitting strings in multiple rows... ;)
+Lets hear this from Gurus... :)
+
+Few people also use this way : (using dbms_random.value() )
+WITH xx AS
+        (SELECT 1 id, 'A,B' str FROM DUAL
+         UNION ALL
+         SELECT 2 id, 'C,D' str FROM DUAL--UNION ALL
+                                         --SELECT 2 id, 'B,A,E,E,E,D,F' str FROM DUAL
+     )
+    SELECT id,
+           REGEXP_SUBSTR (str,
+                          '[^,]',
+                          1,
+                          LEVEL),
+           LEVEL,
+           SYS_GUID ()
+      FROM xx
+CONNECT BY     LEVEL <= LENGTH (REPLACE (str, ','))
+           AND PRIOR id = id
+           AND PRIOR DBMS_RANDOM.VALUE () IS NOT NULL 
+  ORDER BY id, LEVEL;
+Cheers,
+Manik.
+Like Show 0 Likes(0)Actions 
+3. Re: Reg : sys_guid()
+ranit B
+Guru
+ranit B 15-Apr-2013 08:28 (in response to ranit B)
+Guys -
+
+I went through the link that Jeneesh provided (by Laurent).
+I guess all the below scenarios, are used for the same reason (which is still not very clear):
+1-- AND PRIOR sys_guid() != sys_guid();
+2-- AND PRIOR sys_guid() is not null
+3-- AND PRIOR dbms_random.value != dbms_random.value
+4-- AND PRIOR DBMS_RANDOM.VALUE () IS NOT NULL
+But, they all are <tt>TRUE</tt> conditions and also they form a relation between 2 adjacent rows (PRIOR does that).
+
+And strangely, if you remove that clause, it throws : <tt>ORA-01436: CONNECT BY loop in user data</tt>
+Is it forming some kind of cycle?
+
+Also <tt>NOCYCLE</tt> can't be used because it is to be used as <tt>CONNECT BY NOCYCLE</tt>
+Like Show 0 Likes(0)Actions 
+4. Re: Reg : sys_guid()
+BluShadow
+Point Tycoon
+BluShadow 15-Apr-2013 08:28 (in response to ranit B)
+ranit B wrote:
+Hi Experts,
+
+I know question is very simple, but just trying to learn things clearly...
+
+I'm not able to get the use of <tt>SYS_GUID</tt> here.
+It seems like it's used to generate some unique id but why <tt>'PRIOR SYS_GUID()'</tt> and that too checking for <tt>'IS NOT NULL'</tt>?
+WITH xx AS
+(
+SELECT 1 id, 'A,B' str FROM DUAL
+UNION ALL
+SELECT 2 id, 'C,D' str FROM DUAL
+--UNION ALL
+--SELECT 2 id, 'B,A,E,E,E,D,F' str FROM DUAL
+)
+select 
+id, regexp_substr(str,'[^,]',1,level), level, SYS_GUID() 
+from xx
+connect by level <= length(replace(str,','))
+and PRIOR id =  id
+and PRIOR SYS_GUID() is not null  /* on commenting this getting err : "ORA-01436: CONNECT BY loop in user data" */
+order by id, level;
+Output :
+1     A     1     DA607FA725E21435E0440003BA095435
+1     B     2     DA607FA725E41435E0440003BA095435
+2     C     1     DA607FA725E61435E0440003BA095435
+2     D     2     DA607FA725E81435E0440003BA095435
+Can any body please explain me this?
+It's not immediately obvious.
+
+SQL> ed
+Wrote file afiedt.buf
+
+  1  WITH xx AS
+  2  (
+  3          SELECT 1 id, 'A,B,C,D' str FROM DUAL
+  4          UNION ALL
+  5          SELECT 2 id, 'C,D,E,F' str FROM DUAL
+  6  )
+  7  select id
+  8        ,prior id as prior_id
+  9        ,regexp_substr(str,'[^,]',1,level)
+ 10        ,level
+ 11        ,PRIOR SYS_GUID() as prior_sysguid
+ 12  from xx
+ 13  connect by level <= length(replace(str,','))
+ 14      and id = PRIOR id
+ 15      and PRIOR SYS_GUID() is not null
+ 16* order by id, level
+SQL> /
+
+        ID   PRIOR_ID REGEXP_      LEVEL PRIOR_SYSGUID
+---------- ---------- ------- ---------- --------------------------------
+         1            A                1
+         1          1 B                2 1D4A0C78B954461C8FA0C0E7FF7ADA17
+         1          1 C                3 AE632F4F07E84472AAFDA6567A91AF34
+         1          1 D                4 6F879C1E495F4567AE0ECABB9793F58E
+         2            C                1
+         2          2 D                2 047481EA7F3047F3863B31F433004A59
+         2          2 E                3 2482519A594A4B3A973E9891DB91C0E5
+         2          2 F                4 852998890CA5430ABDFAAFE5845C8FB9
+
+8 rows selected.
+... when you connect by "level <= " you are doing row generation, so creating levels 1, 2, 3.. etc. until the correct condition is met. That bit's simple enough.
+Now, because you are wanting to do it for multiple rows of data you include the "id = PRIOR id" so that it treats each 'input' row in it's own right.
+However, as the rows are generated, the number of rows with a PRIOR id equal to the id we want, is multiple, so we would end up with a CYCLE in the data...(as I understand it there are two types of CYCLE... one that exists in the source data being processed, and one that can happen in the generated rows of the hierarchical query) but... we cannot use the NOCYCLE keyword, because we are doing row generation, and the NOCYCLE keyword prevents that row generation from happening...
+By including the PRIOR sys_guid() we create a uniqueness that prevents the cycling on the generated rows... with the PRIOR creating the link between the generating row and the previous row, and the SYS_GUID being unique for the row. Internally this prevents it from cycling back to the previously generated row.
+
+It's tricky to understand and to explain, but the key thing is the reference back to the PRIOR generated row with something that is unique. (I tend to prefer the sys_guid as random values are not guaranteed to be unique and that, to me, seems like a risk).
+
+You don't have to say "prior sys_guid() is not null" you could actually compare it to the current sys_guid()...
+SQL> ed
+Wrote file afiedt.buf
+
+  1  WITH xx AS
+  2  (
+  3          SELECT 1 id, 'A,B,C,D' str FROM DUAL
+  4          UNION ALL
+  5          SELECT 2 id, 'C,D,E,F' str FROM DUAL
+  6  )
+  7  select id
+  8        ,prior id as prior_id
+  9        ,regexp_substr(str,'[^,]',1,level)
+ 10        ,level
+ 11        ,PRIOR SYS_GUID() as prior_sysguid
+ 12        ,SYS_GUID() as current_sysguid
+ 13  from xx
+ 14  connect by level <= length(replace(str,','))
+ 15      and id = PRIOR id
+ 16      and PRIOR SYS_GUID() != SYS_GUID()
+ 17* order by id, level
+SQL> /
+
+        ID   PRIOR_ID REGEXP_      LEVEL PRIOR_SYSGUID                    CURRENT_SYSGUID
+---------- ---------- ------- ---------- -------------------------------- --------------------------------
+         1            A                1                                  21A3030F3B71456294EE83A085691E99
+         1          1 B                2 618849F3B5514053BF4F8DC1DC39134B 07190E0E495F4F7E9FC8FE73D53051AB
+         1          1 C                3 6B26EF982774483BAE2B0C137C3C4747 D0A1CC4855B24E7BA22560BF5222EC72
+         1          1 D                4 CD0C70D4E04342FB9C92CFFFEA1604ED 0545AAE9F6EE4E3687DBDFC412594FB6
+         2            C                1                                  7D5A7BDA3A0F4EDD9BB0013AC12FBBBB
+         2          2 D                2 0DC27E2C3B8C43F9A4854672E956A82C 631B802E32E84C2FA885250F17077AF2
+         2          2 E                3 D01FC9DE7F024415AA63FEF2DBC03A2A 5E55A1CCF0DA4D80B112EA79E7F27AC3
+         2          2 F                4 017F058BB1A64DA2864736E60AEB0BA2 7BADBB57299C43729BDEB18A0E03F3F0
+
+8 rows selected.
+So, it's all about breaking the cycle within the generated rows (preventing it from cycling back to it's parent).
+
+That's even got my head spinning, first thing Monday morning... ... ... not sure I explained it that well. :-?
+Like Show 1 Likes(1)Actions 
+5. Re: Reg : sys_guid()
+BluShadow
+Point Tycoon
+BluShadow 15-Apr-2013 08:31 (in response to ranit B)
+Ranit,
+
+Not sure how you got your sys_guids all showing the same value.
+I just tried your query on my 10.2.0.5 installation...
+SQL> WITH xx AS(        SELECT 1 id, 'A,B' str FROM DUAL        UNION ALL
+  2          SELECT 2 id, 'C,D' str FROM DUAL        --UNION ALL
+  3          --SELECT 2 id, 'B,A,E,E,E,D,F' str FROM DUAL
+  4          )
+  5  select
+  6      id, regexp_substr(str,'[^,]',1,level), level, SYS_GUID() from xx
+  7  connect by level <= length(replace(str,','))    and PRIOR id =  id
+  8      and PRIOR SYS_GUID() is not null  /* on commenting this getting err : "ORA-01436: CONNECT BY loop in user data" */
+  9  order by id, level
+ 10  /
+
+        ID REG      LEVEL SYS_GUID()
+---------- --- ---------- --------------------------------
+         1 A            1 86593DCFF170417BB212A198BFEE31D5
+         1 B            2 D82EA2074FB64C02AF4D1224F270513A
+         2 C            1 1357AEA4F595424E8D6E04AAE2F92B19
+         2 D            2 EE1B81ECB1634C6294DC292195DB70DA
+
+SQL>
+Like Show 0 Likes(0)Actions 
+6. Re: Reg : sys_guid()
+jeneesh
+Legend
+jeneesh 15-Apr-2013 08:38 (in response to BluShadow)
+Sorry, irrelevant.. Dleted my post..
+
+Edited by: jeneesh on Apr 15, 2013 2:08 PM
+Like Show 0 Likes(0)Actions 
+7. Re: Reg : sys_guid()
+ranit B
+Guru
+ranit B 15-Apr-2013 08:37 (in response to BluShadow)
+BluShadow wrote:
+Ranit,
+
+Not sure how you got your sys_guids all showing the same value.
+No Blu... check carefully, they are different in the 12th bit.
+1     A     1     DA6A707F25E--2--1435E0440003BA095435
+1     B     2     DA607FA725E--4--1435E0440003BA095435
+2     C     1     DA607FA725E--6--1435E0440003BA095435
+2     D     2     DA607FA725E--8--1435E0440003BA095435
+Like Show 0 Likes(0)Actions 
+8. Re: Reg : sys_guid()
+Manik
+Super Elite
+Manik 15-Apr-2013 08:40 (in response to BluShadow)
+Basically I guess it works with any kind of DB object which retrives different values when executed twice or more than twice.. (e.g sequence here)
+
+I just tried it with sequence and it worked.
+
+Please correct me if I am wrong in understanding this...
+create sequence foo_seq1 start with 1 increment by 1 
+
+
+CREATE or replace FUNCTION fn_get_seq
+   RETURN NUMBER AS
+BEGIN
+   RETURN foo_seq1.NEXTVAL;
+END;
+
+
+WITH xx AS
+        (SELECT 1 id, 'A,B' str FROM DUAL
+         UNION ALL
+         SELECT 2 id, 'C,D' str FROM DUAL
+     )
+    SELECT id,
+           REGEXP_SUBSTR (str,
+                          '[^,]',
+                          1,
+                          LEVEL),
+           LEVEL
+      FROM xx
+CONNECT BY     LEVEL <= LENGTH (REPLACE (str, ','))
+           AND PRIOR id = id
+           AND PRIOR fn_get_seq !=fn_get_seq
+  ORDER BY id, LEVEL;
+Output:
+ID     REGEXP_SUBSTR(STR,'[^,]',1,LEVEL)     LEVEL
+1     A     1
+1     B     2
+2     C     1
+2     D     2
+Cheers,
+Manik.
+Like Show 0 Likes(0)Actions 
+9. Re: Reg : sys_guid()
+ranit B
+Guru
+ranit B 15-Apr-2013 09:44 (in response to BluShadow)
+but... we cannot use the NOCYCLE keyword, because we are doing row generation, and the NOCYCLE keyword prevents that row generation from happening...
+Blu- I didn't get this one clearly .
+
+From docs( http://docs.oracle.com/cd/B19306_01/server.102/b14200/queries003.htm ),
+The NOCYCLE parameter instructs Oracle Database to return rows from a query even if a CONNECT BY LOOP exists in the data.
+Both seems contradicting to each other.
+
+Am i missing some concept or getting some point wrongly?
+Could you please explain?
+Like Show 0 Likes(0)Actions 
+10. Re: Reg : sys_guid()
+Purvesh K
+Guru
+Purvesh K 15-Apr-2013 10:38 (in response to ranit B)
+Hello Ranit,
+
+IMO, which concurs with Blu's explanation, use of SYS_GUID() is just a breaker to distinguish between rows in hierarchical queries. You always have an alternative of using DBMS_RANDOM and others like Prior 1 is not null. However, reason of me prefering SYS_GUID over DBMS_RANDOM, is that prior produces more non-repeating values than for latter (though I did not test, but , at least, it did not occur to me, and documentation does certify it).
+Like Show 0 Likes(0)Actions 
+11. Re: Reg : sys_guid()
+chris227
+Super Elite
+chris227 15-Apr-2013 10:46 (in response to ranit B)
+ranit B wrote:
+but... we cannot use the NOCYCLE keyword, because we are doing row generation, and the NOCYCLE keyword prevents that row generation from happening...
+Blu- I didn't get this one clearly .
+
+From docs( http://docs.oracle.com/cd/B19306_01/server.102/b14200/queries003.htm ),
+The NOCYCLE parameter instructs Oracle Database to return rows from a query even if a CONNECT BY LOOP exists in the data.
+Both seems contradicting to each other.
+
+Am i missing some concept or getting some point wrongly?
+Could you please explain?
+NOCYCLE returns the data if a cycle exists, but only the point the cycle starts.
+At this point it checks for other pathes. If there are none, the work is done.
+With the additional prior sys_guid is not null it is ensured, that no cycle will never ever occur.
+So the only restriction on our output in case of row generation is now the limit on the level.
+
+Edited by: chris227 on 15.04.2013 03:46
+Like Show 0 Likes(0)Actions 
+Correct Answer12. Re: Reg : sys_guid()
+BluShadow
+Point Tycoon
+BluShadow 15-Apr-2013 10:57 (in response to ranit B)
+ranit B wrote:
+but... we cannot use the NOCYCLE keyword, because we are doing row generation, and the NOCYCLE keyword prevents that row generation from happening...
+Blu- I didn't get this one clearly .
+
+From docs( http://docs.oracle.com/cd/B19306_01/server.102/b14200/queries003.htm ),
+The NOCYCLE parameter instructs Oracle Database to return rows from a query even if a CONNECT BY LOOP exists in the data.
+Both seems contradicting to each other.
+
+Am i missing some concept or getting some point wrongly?
+Could you please explain?
+I said I thought I'd struggled to explain it (it was too early)
+
+Ok, let's break it down to basics...
+
+Example, we've got 2 id's and we want to generate 3 rows for each...
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5  from   t
+  6* connect by level <= 3
+SQL> /
+
+        ID      LEVEL
+---------- ----------
+         1          1
+         1          2
+         1          3
+         2          3
+         2          2
+         1          3
+         2          3
+         2          1
+         1          2
+         1          3
+         2          3
+         2          2
+         1          3
+         2          3
+
+14 rows selected.
+... but we end up with many more rows than expected. This is because the CONNECT BY is effectively causing a cartesian join between the two id's, which we can see more clearly if we show other information in our output...
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5        ,prior id
+  6        ,sys_connect_by_path(id,'=>') as cpath
+  7  from   t
+  8* connect by level <= 3
+SQL> /
+
+        ID      LEVEL    PRIORID CPATH
+---------- ---------- ---------- --------------------------------------------------
+         1          1            =>1
+         1          2          1 =>1=>1
+         1          3          1 =>1=>1=>1
+         2          3          1 =>1=>1=>2
+         2          2          1 =>1=>2
+         1          3          2 =>1=>2=>1
+         2          3          2 =>1=>2=>2
+         2          1            =>2
+         1          2          2 =>2=>1
+         1          3          1 =>2=>1=>1
+         2          3          1 =>2=>1=>2
+         2          2          2 =>2=>2
+         1          3          2 =>2=>2=>1
+         2          3          2 =>2=>2=>2
+
+14 rows selected.
+... so we want to ensure that our CONNECT BY condition only connects for the source id it's processing rather than all possible combinations... and hence we add our "id = prior id" condition
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5        ,prior id
+  6        ,sys_connect_by_path(id,'=>') as cpath
+  7  from   t
+  8  connect by level <= 3
+  9*        and id = prior id
+SQL> /
+ERROR:
+ORA-01436: CONNECT BY loop in user data
+Which says we have a cycle (connect by loop). So, consider the condition we've just added... ID = PRIOR ID... and look at the previous data that was being output...
+
+As the rows generate, we have lots of previous rows where ID could equal PRIOR ID, some of which are from the same path we're on... so obviously it's now cycling and Oracle cannot deal with that as it's an infinite loop.
+
+If we use the NOCYCLE keyword, to try and get around this...
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5        ,prior id
+  6        ,sys_connect_by_path(id,'=>') as cpath
+  7  from   t
+  8  connect by nocycle level <= 3
+  9*        and id = prior id
+SQL> /
+
+        ID      LEVEL    PRIORID CPATH
+---------- ---------- ---------- -------------------------
+         1          1            =>1
+         2          1            =>2
+We don't get what we want... because we do actually want the id to equal the prior id for the number of levels we want... but the NOCYCLE applies to the whole connect by clauses and the fact that ID = PRIOR ID is preventing it from getting past the first level, while NOCYCLE is in place.
+
+So, can we just add something that's unique to each row... like sys_guid()
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5        ,prior id
+  6        ,sys_connect_by_path(id,'=>') as cpath
+  7  from   t
+  8  connect by level <= 3
+  9         and id = prior id
+ 10*        and sys_guid() is not null
+SQL> /
+ERROR:
+ORA-01436: CONNECT BY loop in user data
+... no, because we still have the cycle of the current and prior ID's.
+
+But if we use the PRIOR sys_guid...
+SQL> ed
+Wrote file afiedt.buf
+
+  1  with t as (select 1 as id from dual union all
+  2             select 2 from dual)
+  3  --
+  4  select id, level
+  5        ,prior id
+  6        ,sys_connect_by_path(id,'=>') as cpath
+  7  from   t
+  8  connect by level <= 3
+  9         and id = prior id
+ 10*        and prior sys_guid() is not null
+SQL> /
+
+        ID      LEVEL    PRIORID CPATH
+---------- ---------- ---------- ---------------------
+         1          1            =>1
+         1          2          1 =>1=>1
+         1          3          1 =>1=>1=>1
+         2          1            =>2
+         2          2          2 =>2=>2
+         2          3          2 =>2=>2=>2
+
+6 rows selected.
+... it works.
+
+The key thing here is the PRIOR keyword (and has also been demonstrated in Manik's example using a sequence along with PRIOR).
+
+The PRIOR keyword is internally adding that sys_guid() to the connection when looking up the data to connect by, and makes the SQL engine see internally that the current row and the prior row are different things (which isn't obvious to it from just the ID)
+
+If I've got time, I'll try and knock up some PL/SQL code that demonstrates how Oracle is (probably - as I obviously don't know Oracle internal code) processing the hierarchical query.
+Like Show 1 Likes(1)Actions 
+13. Re: Reg : sys_guid()
+ranit B
+Guru
+ranit B 15-Apr-2013 14:04 (in response to ranit B)
+Thanks... Thanks... Thanks a lot - Purvesh, Chris & of-course Blu :)
+The explanation of <tt>CONNECT BY PRIOR</tt>, <tt>NOCYCLE</tt> and <tt>SYS_GUID()</tt> can't get better than this.
+Stupendous!!!
+
+@Blu - If you feel correct, can this post (i.e. your demonstration) be placed in the bookmarks (FAQ) list.
+Your work can really help many understand the working & intricacies of the above concepts.
+
+Just a suggestion. ;)
+
+- Ranit
+Like Show 0 Likes(0)Actions 
+14. Re: Reg : sys_guid()
+BluShadow
+Point Tycoon
+BluShadow 15-Apr-2013 15:00 (in response to ranit B)
+ranit B wrote:
+Thanks... Thanks... Thanks a lot - Purvesh, Chris & of-course Blu :)
+The explanation of <tt>CONNECT BY PRIOR</tt>, <tt>NOCYCLE</tt> and <tt>SYS_GUID()</tt> can't get better than this.
+Stupendous!!!
+
+@Blu - If you feel correct, can this post (i.e. your demonstration) be placed in the bookmarks (FAQ) list.
+Your work can really help many understand the working & intricacies of the above concepts.
+I think the explanation would need some better refinement before it's worthy of me putting it on the FAQ... and to be honest, trying to understand how a hierarchical query works, is not a question that's asked that often.
